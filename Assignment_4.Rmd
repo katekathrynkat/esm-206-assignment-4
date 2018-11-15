@@ -1,6 +1,6 @@
 ---
 title: "Assignment 4"
-author: "Kate"
+author: "Ken Gilliland, Kate Culhane, Sean Denny"
 date: "November 13, 2018"
 output: html_document
 editor_options: 
@@ -33,11 +33,17 @@ trap <- read_csv('lobster_traps.csv')
 
 ```{r reformat data, include=FALSE}
 
-# Reformat size data
+# Create data frame for MPA information
 
-size1 <- as.data.frame(size) %>% 
-  filter(SIZE != -99999) %>% 
-  expand.dft(., freq = 'COUNT') %>% 
+site <- unique(size$SITE)
+MPA <- c('Y','Y','N','N','N')
+MPAs <- data.frame(site, MPA)
+
+# Reformat size data so that each row is an individual lobster
+
+size2 <- as.data.frame(size) %>% 
+  filter(SIZE != -99999) %>% # filter out transects with no lobs
+  expand.dft(., freq = 'COUNT') %>% # each row is an indv
   rename(
     year = YEAR,
     month = MONTH,
@@ -46,17 +52,18 @@ size1 <- as.data.frame(size) %>%
     lter_trans = SBC_LTER_TRANSECT,
     lob_trans = LOBSTER_TRANSECT,
     size = SIZE
-  )
+  ) %>% 
+  full_join(., MPAs, by = 'site')
 
-# Reformat trapping data
+# Simplify trapping data
 
-trap2 <- trap %>% 
-  filter(SITE=='AQUE' |
+trap2 <- full_join(trap, MPAs, by = c('SITE'='site')) %>% 
+  filter(SITE=='AQUE' | # filter for our 5 sites of interest
            SITE=='CARP' |
            SITE=='IVEE' |
            SITE=='MOHK' |
            SITE=='NAPL') %>% 
-  select(YEAR, SITE, TRAPS) %>% 
+  select(YEAR, SITE, MPA, TRAPS) %>% 
   rename(year = YEAR,
          site = SITE,
          traps = TRAPS)
@@ -65,102 +72,163 @@ trap2 <- trap %>%
 
 ###Part 1. Lobster abundance and fishing pressure (2012 - 2017)
 
-**Ken:** Best way to depict these data?  1. Table of summary statistics for abundance and fishing data at each site 2. Figures of abundance at each site and fishing pressure (5 column graphs with abundance = column, and lines for fishing pressure)
+**Ken:** Best way to depict these data?
+1. Table of summary statistics for abundance and fishing data at each site
+2. Figures of abundance at each site and fishing pressure (5 column graphs with abundance = column, and lines for fishing pressure)
 
-```{r abundance: standardize for effort}
+```{r abundance: standardize for effort, include=FALSE}
 
 # Create data frame of effort: number of transects surveyed at each site for each year
 
-effort <- size %>% 
+lob_effort <- size %>% 
   group_by(SITE, YEAR) %>% 
   summarize(effort = length(unique(SBC_LTER_TRANSECT)))
 
 # Create data frame of abundance: total number of indv found at each site for each year
 
-n <- size1 %>% 
+lob_n <- size2 %>% 
   group_by(site, year) %>% 
   summarize(raw_n = length(size))
 
 # Combine effort and abundance data frames
 
-n2 <- full_join(n, effort, by = c('site'='SITE', 'year'='YEAR')) %>% 
-  mutate(n = raw_n/effort)
-
-# Add column for MPA/nonMPA
-site <- unique(n2$site)
-MPA <- c('N','N','Y','N','Y')
-MPAs <- data.frame(site, MPA)
-
-n3 <- full_join(n2, MPAs, by = 'site')
+abundance <- full_join(lob_n, lob_effort,
+                by = c('site'='SITE', 'year'='YEAR')) %>% # combine effort and abundance data frames
+  mutate(n = raw_n/effort) %>% # add column for abundance adjusted for effort
+  full_join(., MPAs, by = 'site') # add MPA information
 
 ```
 
 
-```{r abundance: scatter plot per site per year}
+```{r abundance: scatter plot per site over time, echo=FALSE}
 
-nsite_scatter <- ggplot(n3, aes(x = year, y = n)) +
-  geom_point(aes(col = site)) +
-  geom_line(aes(col = site)) +
-  theme_minimal()
+# Scatter plot of lobster abundance over time at the 5 sites
+# Abundance adjusted for survey effort
 
-nsite_scatter
+n_site_scatter <- ggplot(abundance, aes(x = year, y = n,
+                                        group = site)) +
+  geom_point(aes(col = MPA)) +
+  geom_line(aes(col = MPA)) +
+  scale_color_manual(values = c("grey", "black")) +
+  theme_minimal() +
+  labs(x = 'Year',
+       y = 'Lobster abundance')
+
+n_site_scatter
 
 ```
 
 
-```{r abundance: scatter plot per year (all sites)}
+```{r abundance: scatter plot over time, echo=FALSE}
 
-n_year <- n %>% 
+# Scatter plot of lobster abundance over time
+# All sites combined
+# Not adjusted for survey effort (consistent over time)
+
+n_scatter <- abundance %>% 
   group_by(year) %>% 
-  summarize(total_n = sum(raw_n))
-
-n_scatter <- ggplot(n_year, aes(x = year, y = total_n)) +
-  geom_point() +
-  geom_line() +
-  theme_minimal()
+  summarize(total_n = sum(raw_n)) %>% 
+  ggplot(aes(x = year, y = total_n)) +
+    geom_point() +
+    geom_line() +
+    theme_minimal() +
+    labs(x = 'Year',
+         y = 'Total lobster abundance')
 
 n_scatter
 
 ```
 
 
-```{r fishing: standardize for effort}
+```{r fishing: standardize for effort, include=FALSE}
 
 # Create data frame of effort: number of swaths surveyed at each site for each year
 
-effort_trap <- trap2 %>% 
+trap_effort <- trap2 %>% 
   group_by(site, year) %>% 
   summarize(effort = length(unique(traps)))
 
-# Create data frame of abundance: total number of indv found at each site for each year
+# Create data frame of abundance: total number of traps found at each site for each year
 
-n <- size1 %>% 
+trap_n <- trap2 %>% 
   group_by(site, year) %>% 
-  summarize(raw_n = length(size))
+  summarize(raw_traps = sum(traps))
 
 # Combine effort and abundance data frames
 
-n2 <- full_join(n, effort, by = c('site'='SITE', 'year'='YEAR')) %>% 
-  mutate(n = raw_n/effort)
-
-# Add column for MPA/nonMPA
-site <- unique(n2$site)
-MPA <- c('N','N','Y','N','Y')
-MPAs <- data.frame(site, MPA)
-
-n3 <- full_join(n2, MPAs, by = 'site')
+fishing <- full_join(trap_n, trap_effort, 
+                by = c('site', 'year')) %>% # combine effort and trap data frames
+  mutate(traps = raw_traps/effort) %>% # add column for traps adjusted for effort
+  full_join(., MPAs, by = 'site') # add MPA information
 
 ```
 
 
-```{r fishing: scatter plot per site per year}
+```{r fishing: scatter plot per site over time, echo=FALSE}
 
-site_scatter <- ggplot(trap2, aes(x = year, y = traps)) +
-  geom_point(aes(col = site)) +
-  geom_line(aes(col = site)) +
-  theme_minimal()
+# Create scatter plot of fishing pressure at each site over time
+# Number of traps adjusting for survey effort
 
-site_scatter
+trap_site_scatter <- ggplot(fishing, aes(x = year, y = traps,
+                                         group = site)) +
+  geom_point(aes(col = MPA)) +
+  geom_line(aes(col = MPA)) +
+  scale_color_manual(values = c("grey", "black")) +
+  theme_minimal() +
+  labs(x = 'Year',
+       y = 'Number of traps')
+
+trap_site_scatter
+
+```
+
+
+```{r fishing: scatter plot over time, echo=FALSE}
+
+# Scatter plot of fishing pressure over time
+# All sites combined
+# Not adjusted for survey effort
+
+trap_scatter <- fishing %>% 
+  group_by(year) %>% 
+  summarize(total_traps = sum(raw_traps)) %>% 
+  ggplot(aes(x = year, y = total_traps)) +
+    geom_point() +
+    geom_line() +
+    theme_minimal() +
+    labs(x = 'Year',
+         y = 'Total number of traps')
+
+trap_scatter
+
+```
+
+
+```{r compare abundance and fishing: scatter plot over time, echo=FALSE}
+
+# Scatter plot comparing lobster abundance and trapping effort over time
+# All sites combined
+# Not adjusted for survey effort 
+
+abundance2 <- abundance %>% 
+  group_by(year) %>% 
+  summarize(total_n = sum(raw_n))
+
+fishing2 <- fishing %>% 
+  group_by(year) %>% 
+  summarize(total_traps = sum(raw_traps))
+
+compare_scatter <- ggplot() +
+  geom_point(dat=abundance2, aes(x = year, y = total_n)) +
+  geom_line(dat=abundance2, aes(x = year, y = total_n)) +
+  geom_point(dat=fishing2, aes(x = year, y = total_traps)) +
+  geom_line(dat=fishing2, aes(x = year, y = total_traps)) +
+  scale_y_continuous(limits = c(0,2500), sec.axis = dup_axis(name = 'Total number of traps')) +
+  theme_minimal() +
+  labs(x = 'Year',
+       y = 'Total lobster abundance')
+
+compare_scatter
 
 ```
 
@@ -168,24 +236,21 @@ site_scatter
 
 ###Part 2. Mean lobster size by site in 2017
 
+```{r size: data distribution and variance, include=FALSE}
 
-```{r}
-
-size2017 <- size1 %>% 
+# Data frame for 2017 data only
+size2017 <- size2 %>% 
   filter(year == "2017") %>%  # keeps only 2017
-  select (year, site, size) # selects only 2017, the 5 sites, and size
-  
-```
+  select (year, site, size, MPA)
 
-```{r}
+# Histogram of size by site
 size_2017_hist<- ggplot(size2017, aes(x = size)) +
   geom_histogram(aes(fill = site)) +
   facet_wrap(~ site, scale = "free")
 
 size_2017_hist
-```
 
-```{r}
+# qq-plot of size by site
 qq_size2017<- ggplot(size2017, (aes(sample= size))) +
   geom_qq(aes(color = site)) +
   facet_wrap(~site, scale = "free")
@@ -193,21 +258,38 @@ qq_size2017<- ggplot(size2017, (aes(sample= size))) +
 qq_size2017
 
 # based on qqplots and histograms observations for each group appear normally distrubuted. Also, n > 30 for all groups, so means will be normally distrubuted
-```
 
-```{r}
-# If the largest sample variances is < 4x greater than the smallest sample variance, then these are "close enough" to consider variances equal
 
+
+# Variance of size by site
+
+# Levene Test 
+# leveneTest() function in the 'car' package
+# H0: No difference in variances (variances are equal)
+# HA: Variances are NoT equal
+
+levene_size2017 <- leveneTest(size ~ site, data = size2017)
+
+levene_size2017
+# There is a significant difference in variances across species
+
+# Actual variances:
 variances <- size2017 %>% 
   group_by(site) %>% 
   summarize(
     variance = var(size)
     )
 
-variances # the largest variance (205.1)(IVEE) is definately not 4x greater than the smallest variance (86.1)(MOHK)
+variances
+
+# the largest variance (205.1)(IVEE) is definately not 4x greater than the smallest variance (86.1)(MOHK)
+# If the largest sample variances is < 4x greater than the smallest sample variance, then these are "close enough" to consider variances equal for ANOVA
 
 ```
-```{r}
+
+
+```{r size: summary stats, echo=FALSE}
+
 # summary statistics for 2017 carapace size
 
 size_sum <- size2017 %>% 
@@ -224,13 +306,7 @@ size_sum <- size2017 %>%
       Site == "IVEE" ~ "Isla Vista", 
       Site == "MOHK" ~ "Mohawk", 
       Site == "NAPL" ~ "Naples")) 
-      
-   
-  
-View(size_sum)
-```
 
-```{r}
 table_caption <- '**Table 1.** **California spiny lobster (*Panulirus interruptus*) Carapace Length (mm) Recorded at five sites in the Santa Barbara Channel (2017).** Mean, standard deviation, and sample size of Carapace Length (mm) Recorded at five sites in the Santa Barbara Channel in 2017. Data retrieved from The Santa Barbara Coastal Long Term Ecological Research Project.' 
 
 table_colnames <-c('Site', 'Mean', 'SD', 'n') 
@@ -244,179 +320,142 @@ size_anova_tab <-kable(size_sum,
 
 
 size_anova_tab
+
 ```
 
-```{r}
-# Levene Test 
-# leveneTest() function in the 'car' package
 
-levene_size2017 <- leveneTest(size ~ site, data = size2017)
+```{r size: ANOVA and post-hoc tests, include=FALSE}
 
-levene_size2017
-
-# H0: No difference in variances (variances are equal)
-# HA: Variances are NoT equal
-
-# There is a significant difference in variances across species
-```
-
-```{r}
 # HO: The means across all groups are equal
 # HA: At least two means differ
 
 size2017_anova <- aov(size ~ site, data = size2017)
 
 summary(size2017_anova)
+
+# there's at least one sig diff!!
+
+# post-hoc testing: Tukey's HSD 
+size2017_ph <- TukeyHSD(size2017_anova)
+
+size2017_ph
+# significant differences between:
+# 1. NAPL and CARP
+# 2. NAPL and IVEE
+
 ```
 
-```{r}
+Satisfy the conditions of parametric tests (normal distribution, equal variance), so used ANOVA and Tukey's HSD. Only found significantdifferences between:
+
+1. NAPL and CARP
+2. NAPL and IVEE
+
+```{r size: boxplot, echo=FALSE}
+
 site_names <- c("Arroyo Quemado", "Carpinteria", "Isla Vista", "Mohawk", "Naples")
 
-MPA_color <- c("white", "white", "gray60", "white", "gray60")
-
 size_anova <- ggplot(size2017, aes(x = site, y = size)) +
-  geom_boxplot(aes(fill = size)) +
-  scale_fill_manual(values = MPA_color) +
+  geom_boxplot(aes(fill = MPA)) +
+  scale_fill_manual(values = c('grey', 'white')) +
   theme_classic() +
   scale_x_discrete(labels = site_names) +
   labs(x = "Site", y = "Carapace Length (mm) (n = 1668)") +
   theme(plot.title = element_text(hjust = 0.5))
   
-
 size_anova
 
-# color mpas
-```
-
-
-
-```{r}
-
-# H0: There is no significant difference between means
-# HA: There are 
-size2017_ph <- TukeyHSD(size2017_anova)
-
-size2017_ph
 ```
 
 <br>
 
 ###Part 3. Changes in lobster size at MPA and non-MPA sites for 2012 and 2017
 
-T test for MPAs
-```{r}
-size_2012_2017_MPA <- size1 %>% 
+```{r MPA: data frames, include=FALSE}
+
+# Create data frame for 2012, 2014, MPA data only
+size_2012_2017_MPA <- size2 %>% 
   filter(year == "2012" | year == "2017") %>%  # keeps only 2012 and 2017
   filter(site == "IVEE" | site == "NAPL") %>% #keeps the MPAs
   select (year, site, size) %>%  # selects '12 and '17, 5 sites, and size
   group_by(year)
 
-View (size_2012_2017_MPA)
-```
-
-```{r, echo = FALSE}
-# Individual dataframe for 2012
+# Individual data frame for 2012
 
 MPA2012 <- size_2012_2017_MPA  %>% 
   filter(year == "2012") %>%    # keeps only 2012
   pull (size)
 
-View(MPA2012)
-```
-
-```{r, echo = FALSE}
 # Individual dataframe for 2017
 
 MPA2017 <- size_2012_2017_MPA  %>% 
   filter(year == "2017") %>%    # keeps only 2017
   pull (size)
   
-View(MPA2017)
 ```
 
-```{r, echo = FALSE}
+```{r MPA: t-test , include = FALSE}
 
 # F-test for equal variances between 2012 and 2017
 
 var.test(MPA2012,MPA2017, data = .) # F-test
 
-# Variances are the same use a student's t
+# Variances are the same --> use a student's t (override Welch approx)
 
-```
-
-```{r, echo = FALSE}
-
+# t-test
 # 2-sided, 2-sample t-test between 2012 and 2017
 
-MPA_2012_2017_t <- t.test(MPA2012, MPA2017, data = ., var.equal = TRUE)
+MPA_2012_2017_t <- t.test(MPA2012, MPA2017, var.equal = TRUE)
 
 MPA_2012_2017_t
-```
-
-```{r, echo = FALSE}
-
-# Effect size of the differences of size 2012 vs 2017
-
-Cohen_d <- cohen.d(MPA2012, MPA2017)
-
-Cohen_d
-
-#(Cohen's d = 0.35)
-# Absolute difference 2012 = 67.4 to 2017 = 72.2
+# no significant difference
 
 ```
 
-T test for non-MPAs
-```{r}
-size_2012_2017_NON <- size1 %>% 
+
+```{r non-MPA: data frames, include=FALSE}
+
+# Create data frame for 2012, 2014, non-MPA data only
+
+size_2012_2017_NON <- size2 %>% 
   filter(year == "2012" | year == "2017") %>%  # keeps only 2016
   filter(site == "MOHK" | site == "CARP" | site == "AQUE") %>% # keeps the non-MPAs
   select (year, site, size) %>%  # selects '12 and '17, 5 sites, and size
   arrange(site)
 
-View (size_2012_2017_NON)
-```
-
-```{r, echo = FALSE}
 # Individual dataframe for 2012
 
 NON2012 <- size_2012_2017_NON  %>% 
   filter(year == "2012") %>%    # keeps only 2012
   pull (size) # keeps only size
 
-View(NON2012)
-```
-
-```{r, echo = FALSE}
 # Individual dataframe for 2017
 
 NON2017 <- size_2012_2017_NON  %>% 
   filter(year == "2017") %>%    # keeps only 2017
   pull (size) # keeps only size
   
-View(NON2017)
 ```
 
-```{r, echo = FALSE}
+```{r non-MPA: t-test, include=FALSE}
 
 # F-test for equal variances between 2012 and 2017
 
 var.test(NON2012,NON2017, data = .) # F-test
 
-# Variances are the same use a student's t
+# Variances are the same --> use a student's t (override Welch approx)
 
-```
-
-```{r, echo = FALSE}
-
+# t-test
 # 2-sided, 2-sample t-test between 2012 and 2017
 
 NON_2012_2017_t <- t.test(NON2012, NON2017, data = ., var.equal = TRUE)
 
 NON_2012_2017_t
+# there IS a sig diff
+
 ```
 
-```{r, echo = FALSE}
+
+```{r non-MPA: effect size, include=FALSE}
 
 # Effect size of the differences of size 2012 vs 2017
 
@@ -429,30 +468,44 @@ Cohen_d
 
 ```
 
+Variances were equal, so used student's t-test to compare 2012 and 2017 and Cohen's d to calculate effect size. Results:
+
+**MPAs:** NO significant change in sizes from 2012 to 2017.
+
+**non-MPAs:** significant change change in sizes from 2012 to 2017
+
+- effect size is small
+- actual difference: 2012 = 74.92, 2017 = 72.3
+
 
 ###Part 4. Proportions of “legal” lobsters at the 5 sites in 2017
 
-```{r}
+```{r legality: data frame, echo=FALSE}
 
-size_n <- size1 %>% 
-  filter(year == 2017) %>% 
-  group_by(site) %>% 
-  summarize(n = length(site))
-
-size_legal <- size1 %>% 
+size_legal <- size2 %>% 
   filter(year == 2017) %>% 
   mutate(legal = case_when(
     size>82.6 ~ 'Y',
     size<82.6 ~ 'N'
   )) %>% 
-  group_by(site, legal) %>% 
-  summarize(n_legal = length(legal)) %>% 
-  filter(legal == 'Y') %>% 
-  select(site, n_legal)
+  select(site, legal)
 
-size_prop <- full_join(size_n, size_legal, by = 'site') %>% 
-  mutate(prop_legal = n_legal/n)
+legal <- table(size_legal)
+
+legal
 
 ```
 
-The legal minimum carapace size for lobster is 82.6 mm. What proportion of observed lobsters at each site are above the legal minimum? Does that proportion differ significantly across the 5 sites? Note: We’ll be doing chi-square in labs next week, or go ahead with maximum resourcefulness and check out the chisq.test() function on your own!
+
+```{r legality: chi-square, include=FALSE}
+
+# Chi-square test
+
+size_chi <- chisq.test(size_legal$site, size_legal$legal)
+
+size_chi
+# significant association between site and size
+
+```
+
+Ran chi-square on site vs. size and found a significant difference.
