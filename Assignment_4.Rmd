@@ -24,6 +24,7 @@ library(effsize)
 library(pwr)
 library(vcdExtra)
 library(car)
+library(RColorBrewer)
 
 size <- read_csv('lobster_size_abundance.csv')
 trap <- read_csv('lobster_traps.csv')
@@ -54,6 +55,8 @@ size2 <- as.data.frame(size) %>%
     size = SIZE
   ) %>% 
   full_join(., MPAs, by = 'site')
+size2$site <- factor(size2$site,
+                     levels = c('AQUE', 'NAPL', 'IVEE', 'MOHK', 'CARP'))
 
 # Simplify trapping data
 
@@ -67,6 +70,8 @@ trap2 <- full_join(trap, MPAs, by = c('SITE'='site')) %>%
   rename(year = YEAR,
          site = SITE,
          traps = TRAPS)
+trap2$site <- factor(trap2$site,
+                     levels = c('AQUE', 'NAPL', 'IVEE', 'MOHK', 'CARP'))
 
 ```
 
@@ -97,22 +102,29 @@ abundance <- full_join(lob_n, lob_effort,
   mutate(n = raw_n/effort) %>% # add column for abundance adjusted for effort
   full_join(., MPAs, by = 'site') # add MPA information
 
+abundance$site <- factor(abundance$site,
+                         levels = c('AQUE', 'NAPL', 'IVEE', 'MOHK', 'CARP'))
+
 ```
 
 
-```{r abundance: scatter plot per site over time, echo=FALSE}
+```{r FIG 2A - abundance: scatter plot per site over time, echo=FALSE}
 
 # Scatter plot of lobster abundance over time at the 5 sites
 # Abundance adjusted for survey effort
 
-n_site_scatter <- ggplot(abundance, aes(x = year, y = n,
+site_labs <- c('Arroyo Quemado', 'Naples*', 'Isla Vista*', 'Mohawk', 'Carpinteria')
+
+n_site_scatter <- ggplot(abundance, aes(x = year, y = raw_n,
                                         group = site)) +
-  geom_point(aes(col = MPA)) +
-  geom_line(aes(col = MPA)) +
-  scale_color_manual(values = c("grey", "black")) +
-  theme_minimal() +
+  geom_point(aes(col = site)) +
+  geom_line(aes(col = site)) +
+  scale_color_brewer(palette = 'Set2', labels = site_labs) +
+  theme_classic() +
   labs(x = 'Year',
-       y = 'Lobster abundance')
+       y = 'Number of lobsters',
+       title = 'Lobster abundance over time',
+       col = 'Site')
 
 n_site_scatter
 
@@ -161,22 +173,35 @@ fishing <- full_join(trap_n, trap_effort,
   mutate(traps = raw_traps/effort) %>% # add column for traps adjusted for effort
   full_join(., MPAs, by = 'site') # add MPA information
 
+fishing$site <- factor(fishing$site,
+                       levels = c('AQUE', 'NAPL', 'IVEE', 'MOHK', 'CARP'))
+
 ```
 
 
-```{r fishing: scatter plot per site over time, echo=FALSE}
+```{r FIG 2B - fishing: scatter plot per site over time, echo=FALSE}
 
 # Create scatter plot of fishing pressure at each site over time
 # Number of traps adjusting for survey effort
 
-trap_site_scatter <- ggplot(fishing, aes(x = year, y = traps,
+fishing2 <- fishing %>% 
+  filter(site == 'AQUE' | site == 'MOHK' | site == 'CARP')
+
+site_cols2 <- brewer.pal(5, 'Set2')[c(1,4,5)]
+site_labs2 <- c('Arroyo Quemado', 'Mohawk', 'Carpinteria')
+
+trap_site_scatter <- ggplot(fishing2, aes(x = year, y = raw_traps,
                                          group = site)) +
-  geom_point(aes(col = MPA)) +
-  geom_line(aes(col = MPA)) +
-  scale_color_manual(values = c("grey", "black")) +
-  theme_minimal() +
+  geom_point(aes(col = site)) +
+  geom_line(aes(col = site)) +
+  scale_color_manual(values = site_cols2,
+                     labels = site_labs2) +
+  theme_classic() +
   labs(x = 'Year',
-       y = 'Number of traps')
+       y = 'Number of traps',
+       title = 'Fishing pressure over time',
+       col = 'Site') +
+  theme(legend.position = 'none')
 
 trap_site_scatter
 
@@ -229,6 +254,52 @@ compare_scatter <- ggplot() +
        y = 'Total lobster abundance')
 
 compare_scatter
+
+```
+
+
+```{r FIG 3 - compare abundance and fishing: scatter plot over time by MPA, echo=FALSE}
+
+# Scatter plot comparing lobster abundance and trapping effort over time, for MPAs vs. non-MPAs
+# Two sites combined for MPAs, three sites combined for non-MPAs
+# NOT adjusted for survey effort 
+
+abundance3 <- abundance %>% 
+  group_by(year, MPA) %>% 
+  summarize(total_n = sum(raw_n))
+
+fishing3 <- fishing %>% 
+  group_by(year, MPA) %>% 
+  summarize(total_traps = sum(raw_traps))
+
+MPA_labs <- c('non-MPA', 'MPA')
+type_labs <- c('number of lobsters', 'number of traps')
+
+compare_scatter2 <- ggplot() +
+  geom_point(dat = abundance3, aes(x = year, y = total_n,
+                                 group = MPA,
+                                 col = MPA)) +
+  geom_line(dat = abundance3, aes(x = year, y = total_n,
+                                group = MPA,
+                                col = MPA)) +
+  geom_point(dat = fishing3, aes(x = year, y = total_traps/2,
+                               group = MPA,
+                               col = MPA)) +
+  geom_line(dat = fishing3, aes(x = year, y = total_traps/2,
+                              group = MPA,
+                              col = MPA),
+            linetype = 'dashed') +
+  scale_y_continuous(sec.axis = sec_axis(~./2,
+                                         name = 'Number of traps')) +
+  scale_color_manual(values = c("grey70", "black"),
+                     labels = MPA_labs) +
+  theme_classic() +
+  labs(x = 'Year',
+       y = 'Number of lobsters',
+       title = 'Lobster abundance and fishing pressure over time',
+       col = '')
+
+compare_scatter2
 
 ```
 
@@ -343,6 +414,13 @@ size2017_ph
 # 1. NAPL and CARP
 # 2. NAPL and IVEE
 
+# Summary table
+
+size2017_summary <- size2017 %>% 
+  group_by(site) %>% 
+  summarize(mean = mean(size),
+            sd = sd(size))
+
 ```
 
 Satisfy the conditions of parametric tests (normal distribution, equal variance), so used ANOVA and Tukey's HSD. Only found significantdifferences between:
@@ -350,13 +428,13 @@ Satisfy the conditions of parametric tests (normal distribution, equal variance)
 1. NAPL and CARP
 2. NAPL and IVEE
 
-```{r size: boxplot, echo=FALSE}
+```{r FIG 4 - size: boxplot, echo=FALSE}
 
-site_names <- c("Arroyo Quemado", "Carpinteria", "Isla Vista", "Mohawk", "Naples")
+site_names <- c("Arroyo Quemado", "Naples", "Isla Vista", "Mohawk", "Carpinteria")
 
 size_anova <- ggplot(size2017, aes(x = site, y = size)) +
   geom_boxplot(aes(fill = MPA)) +
-  scale_fill_manual(values = c('grey', 'white')) +
+  scale_fill_manual(values = c('grey50', 'white')) +
   theme_classic() +
   scale_x_discrete(labels = site_names) +
   labs(x = "Site", y = "Carapace Length (mm) (n = 1668)") +
@@ -452,6 +530,14 @@ NON_2012_2017_t <- t.test(NON2012, NON2017, data = ., var.equal = TRUE)
 NON_2012_2017_t
 # there IS a sig diff
 
+# Summary stats
+
+size_2012_2017_NON_summary <- size_2012_2017_NON %>% 
+  group_by(year) %>% 
+  summarize(mean = mean(size),
+            sd = sd(size))
+
+
 ```
 
 
@@ -482,17 +568,29 @@ Variances were equal, so used student's t-test to compare 2012 and 2017 and Cohe
 
 ```{r legality: data frame, echo=FALSE}
 
+# Make contingency table of counts of legal and illegal lobs per site
 size_legal <- size2 %>% 
   filter(year == 2017) %>% 
-  mutate(legal = case_when(
+  mutate(legal = case_when( # add column for legality (Y/N)
     size>82.6 ~ 'Y',
     size<82.6 ~ 'N'
   )) %>% 
   select(site, legal)
 
-legal <- table(size_legal)
+legal <- table(size_legal) # turn into a contigency table
 
-legal
+# Make a data frame with counts and proportions
+legal_df <- as_data_frame(legal) # data frame from the contingency table
+legalN <- legal_df[1:5, c(1,3)] # first 5 rows are illegal lobs
+legalY <- legal_df[6:10, c(1,3)] # last 5 rows are legal lobs
+legal2 <- full_join(legalN, legalY, by = 'site') %>% # combine 
+  rename(Y = n.y,
+         N = n.x) %>% 
+  mutate(n = Y+N, # add column for total number of lobs
+         propN = N/n, # prop of illegal lobs
+         propY = Y/n) # prop of legal lobs
+
+legal2
 
 ```
 
